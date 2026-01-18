@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Batch Demo UI</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 24px; }
+    #events { width: 100%; height: 140px; }
+    button { margin-right:8px; }
+    pre { background:#f6f6f8; padding:12px; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <h2>Client Batching Demo</h2>
+  <p>Click "Do Action" rapidly — actions will be batched every <strong>2s</strong>.</p>
+
+  <button id="actionBtn">Do Action</button>
+  <button id="sendNow">Force Flush</button>
+  <div>
+    <label>Pending events:</label>
+    <div id="pendingCount">0</div>
+  </div>
+  <h3>Server response</h3>
+  <pre id="output">—</pre>
+
+<script>
+(() => {
+  // configuration
+  const FLUSH_MS = 2000;      // time window
+  const MAX_BATCH = 50;       // size cap
+  const IDLE_FLUSH_MS = 500;  // flush if idle for this long after an action (optional hybrid)
+
+  const pending = [];
+  let flushTimer = null;
+  let idleTimer = null;
+
+  function updatePendingUI() {
+    document.getElementById('pendingCount').textContent = pending.length;
+  }
+
+  function scheduleFlush() {
+    if (flushTimer) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      flushBatch();
+    }, FLUSH_MS);
+  }
+
+  function scheduleIdleFlush() {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => { idleTimer = null; flushBatch(); }, IDLE_FLUSH_MS);
+  }
+
+  function enqueueEvent(evt) {
+    pending.push(evt);
+    updatePendingUI();
+
+    // flush if too many events accumulated
+    if (pending.length >= MAX_BATCH) {
+      flushBatch();
+      return;
+    }
+
+    // schedule periodic flush
+    scheduleFlush();
+
+    // schedule idle flush for hybrid behavior
+    scheduleIdleFlush();
+  }
+
+  async function flushBatch() {
+    if (pending.length === 0) return;
+    // capture and clear queue quickly
+    const batch = pending.splice(0, pending.length);
+    updatePendingUI();
+
+    // build batch payload
+    const payload = {
+      batchId: 'batch-' + Date.now(),
+      requests: batch.map((e, idx) => ({
+        id: e.id,
+        method: e.method || 'POST',
+        path: e.path || '/batch-demo/api/internal/compute',
+        body: e.body || e
+      }))
+    };
+
+    
+    try {
+      const res = await fetch('/batch-demo/api/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const json = await res.json();
+      document.getElementById('output').textContent = JSON.stringify(json, null, 2);
+    } catch (err) {
+      document.getElementById('output').textContent = 'Network/error:\n' + err;
+    }
+  }
+
+  // example "user action" generator
+  document.getElementById('actionBtn').addEventListener('click', () => {
+    const ev = {
+      id: 'evt-' + Date.now() + '-' + Math.floor(Math.random()*1000),
+      method: 'POST',
+      path: '/batch-demo/api/internal/compute',
+      body: { value: Math.floor(Math.random()*1000), ts: Date.now() }
+    };
+    enqueueEvent(ev);
+  });
+
+  document.getElementById('sendNow').addEventListener('click', flushBatch);
+
+  // flush on page unload to avoid losing events
+  window.addEventListener('beforeunload', () => {
+    if (pending.length === 0) return;
+    navigator.sendBeacon('/batch-demo/api/batch', new Blob([JSON.stringify({
+      batchId: 'unload-' + Date.now(),
+      requests: pending.map(e => ({ id: e.id, method: e.method, path: e.path, body: e.body }))
+    })], { type: 'application/json' }));
+  });
+
+  updatePendingUI();
+})();
+</script>
+</body>
+</html>
