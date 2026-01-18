@@ -9,6 +9,8 @@ At scale, performance cost grows with request count, not payload size.
 
 This is why systems that look healthy in isolation often struggle under concurrency—high RPS, low CPU per request, and unpredictable tail latency.
 
+<img width="1299" height="818" alt="client_side_request_batching" src="https://github.com/user-attachments/assets/8159e6b0-935e-448e-a66d-935ba10aded8" />
+
 The Solution: Intelligent Request Batching
 
 Instead of sending every request immediately, batch lag-tolerant requests over a short window and send them as a single composite call. Latency-sensitive actions (submit, save, checkout, security events) bypass batching, while telemetry, UI state updates, typing indicators, analytics, and presence signals are grouped together.
